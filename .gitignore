@@ -1,0 +1,9 @@
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+.idea
+*_weights
+lib
