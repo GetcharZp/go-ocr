@@ -1,3 +1,7 @@
+---
+license: mit
+pipeline_tag: image-to-text
+---
 <h1 align="center">
     <img width="100%" src="./assets/logo.png" alt="">
 </h1>
@@ -32,7 +36,7 @@ git clone https://huggingface.co/getcharzp/go-ocr
 
 ## 快速开始
 
-例如 `Md5()` 方法，使用方式如下所示，其它方法参考功能列表及其测试案例。
+通过 OCR 引擎的 `RunOCR()` 方法能直接进行完整的检测与识别，也可以通过 `RunDetect()` 与 `RunRecognize()` 分别进行检测与识别。
 
 ```go
 package main
