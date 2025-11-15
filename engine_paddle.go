@@ -77,6 +77,18 @@ func NewPaddleOcrEngine(config Config) (*PaddleOcrEngine, error) {
 		}
 	}
 
+	// 启用CUDA
+	if config.UseCuda {
+		cudaOptions, err := ort.NewCUDAProviderOptions()
+		if err != nil {
+			return nil, fmt.Errorf("创建 CUDAProviderOptions 失败: %w", err)
+		}
+		defer cudaOptions.Destroy()
+		if err := options.AppendExecutionProviderCUDA(cudaOptions); err != nil {
+			return nil, fmt.Errorf("添加 CUDA 执行提供者失败: %w", err)
+		}
+	}
+
 	// 创建检测会话
 	detSession, err := ort.NewDynamicAdvancedSession(
 		config.DetModelPath,

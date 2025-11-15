@@ -28,6 +28,7 @@ type Config struct {
 	DictPath           string // dict.txt (字典) 的路径
 
 	// 可选参数
+	UseCuda             bool    // (可选) 是否启用 CUDA
 	NumThreads          int     // (可选) ONNX 线程数, 默认由CPU核心数决定
 	DetMaxSideLen       int     // (可选) 检测模型预处理的最长边, 默认 960
 	DetOutsideExpandPix int     // (可选) 检测框外扩像素, 默认 10
