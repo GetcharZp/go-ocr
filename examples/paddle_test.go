@@ -17,7 +17,6 @@ func TestPaddleOcr(t *testing.T) {
 		DictPath:           "../paddle_weights/dict.txt",
 	}
 
-	var engine ocr.Engine
 	engine, err := ocr.NewPaddleOcrEngine(config)
 	if err != nil {
 		log.Fatalf("创建 OCR 引擎失败: %v\n", err)
@@ -25,7 +24,7 @@ func TestPaddleOcr(t *testing.T) {
 
 	defer engine.Destroy()
 
-	imagePath := "./test.png"
+	imagePath := "./test.jpg"
 	img, err := imageutil.Open(imagePath)
 	if err != nil {
 		log.Fatalf("加载图像失败: %v\n", err)
@@ -40,7 +39,7 @@ func TestPaddleOcr(t *testing.T) {
 
 	// 绘制检测区域
 	detImage := ocr.DrawBoxes(img, boxes)
-	imageutil.Save("det.png", detImage, 100)
+	imageutil.Save("det.jpg", detImage, 100)
 
 	// 识别
 	for _, box := range boxes {

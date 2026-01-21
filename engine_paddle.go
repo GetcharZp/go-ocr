@@ -2,8 +2,11 @@ package ocr
 
 import (
 	"fmt"
+	"github.com/getcharzp/go-ocr/internal/onnx"
+	"github.com/getcharzp/go-ocr/internal/util"
+	ort "github.com/getcharzp/onnxruntime_purego"
+	"github.com/up-zero/gotool/convertutil"
 	"github.com/up-zero/gotool/imageutil"
-	ort "github.com/yalue/onnxruntime_go"
 	"golang.org/x/image/draw"
 	"image"
 	"math"
@@ -11,15 +14,11 @@ import (
 	"sync"
 )
 
-// 确保 PaddleOcrEngine 结构体实现了 Engine 接口
-// 这是一个编译时检查
-var _ Engine = (*PaddleOcrEngine)(nil)
-
 // PaddleOcrEngine 是 PaddleOCR 引擎的主结构体
 type PaddleOcrEngine struct {
-	detSession *ort.DynamicAdvancedSession // 检测
-	recSession *ort.DynamicAdvancedSession // 识别
-	recMutex   sync.Mutex                  // 保护 recSession (非并发安全)
+	detSession *ort.Session // 检测
+	recSession *ort.Session // 识别
+	recMutex   sync.Mutex   // 保护 recSession (非并发安全)
 
 	dict                []string // 字典
 	detMaxSideLen       int      // 检测模型最长边
@@ -30,85 +29,48 @@ type PaddleOcrEngine struct {
 }
 
 // NewPaddleOcrEngine 用于初始化 ONNX Runtime、加载模型和字典。
-func NewPaddleOcrEngine(config Config) (*PaddleOcrEngine, error) {
-	// 初始化 ONNX Runtime
-	if config.OnnxRuntimeLibPath == "" {
-		return nil, fmt.Errorf("OnnxRuntimeLibPath 不能为空")
-	}
-	ort.SetSharedLibraryPath(config.OnnxRuntimeLibPath)
-	if err := ort.InitializeEnvironment(); err != nil {
-		return nil, fmt.Errorf("初始化 ONNX Runtime 环境失败: %w", err)
+func NewPaddleOcrEngine(cfg Config) (*PaddleOcrEngine, error) {
+	oc := new(onnx.Config)
+	_ = convertutil.CopyProperties(cfg, oc)
+
+	if err := oc.New(); err != nil {
+		return nil, err
 	}
 
 	// 检查和设置默认值
-	if config.DetModelPath == "" || config.RecModelPath == "" || config.DictPath == "" {
+	if cfg.DetModelPath == "" || cfg.RecModelPath == "" || cfg.DictPath == "" {
 		return nil, fmt.Errorf("模型路径和字典路径不能为空")
 	}
-	if config.DetMaxSideLen == 0 {
-		config.DetMaxSideLen = 960
+	if cfg.DetMaxSideLen == 0 {
+		cfg.DetMaxSideLen = 960
 	}
-	if config.RecHeight == 0 {
-		config.RecHeight = 48
+	if cfg.RecHeight == 0 {
+		cfg.RecHeight = 48
 	}
-	if config.RecModelNumClasses == 0 {
-		config.RecModelNumClasses = 18385
+	if cfg.RecModelNumClasses == 0 {
+		cfg.RecModelNumClasses = 18385
 	}
-	if config.HeatmapThreshold == 0 {
-		config.HeatmapThreshold = 0.3
+	if cfg.HeatmapThreshold == 0 {
+		cfg.HeatmapThreshold = 0.3
 	}
-	if config.DetOutsideExpandPix == 0 {
-		config.DetOutsideExpandPix = 10
+	if cfg.DetOutsideExpandPix == 0 {
+		cfg.DetOutsideExpandPix = 10
 	}
 
 	// 加载字典
-	dict, err := loadDict(config.DictPath)
+	dict, err := util.LoadDict(cfg.DictPath)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("加载字典失败: %w", err)
 	}
 
-	// 创建会话选项 (设置线程)
-	options, err := ort.NewSessionOptions()
-	if err != nil {
-		return nil, err
-	}
-	if config.NumThreads > 0 {
-		if err := options.SetIntraOpNumThreads(config.NumThreads); err != nil {
-			return nil, err
-		}
-	}
-
-	// 启用CUDA
-	if config.UseCuda {
-		cudaOptions, err := ort.NewCUDAProviderOptions()
-		if err != nil {
-			return nil, fmt.Errorf("创建 CUDAProviderOptions 失败: %w", err)
-		}
-		defer cudaOptions.Destroy()
-		if err := options.AppendExecutionProviderCUDA(cudaOptions); err != nil {
-			return nil, fmt.Errorf("添加 CUDA 执行提供者失败: %w", err)
-		}
-	}
-
-	// 创建检测会话
-	detSession, err := ort.NewDynamicAdvancedSession(
-		config.DetModelPath,
-		[]string{"x"},            // 输入节点名
-		[]string{"fetch_name_0"}, // 输出节点名
-		options,
-	)
+	detSession, err := oc.OnnxEngine.NewSession(cfg.DetModelPath, oc.SessionOptions)
 	if err != nil {
 		return nil, fmt.Errorf("创建 det session 失败: %w", err)
 	}
 
-	// 创建识别会话
-	recSession, err := ort.NewDynamicAdvancedSession(
-		config.RecModelPath,
-		[]string{"x"},            // 输入节点名
-		[]string{"fetch_name_0"}, // 输出节点名
-		options,
-	)
+	recSession, err := oc.OnnxEngine.NewSession(cfg.RecModelPath, oc.SessionOptions)
 	if err != nil {
-		detSession.Destroy() // 清理已创建的 det session
+		detSession.Destroy()
 		return nil, fmt.Errorf("创建 rec session 失败: %w", err)
 	}
 
@@ -116,11 +78,11 @@ func NewPaddleOcrEngine(config Config) (*PaddleOcrEngine, error) {
 		detSession:          detSession,
 		recSession:          recSession,
 		dict:                dict,
-		detMaxSideLen:       config.DetMaxSideLen,
-		detOutsideExpandPix: config.DetOutsideExpandPix,
-		recHeight:           config.RecHeight,
-		recModelNumClasses:  config.RecModelNumClasses,
-		heatmapThreshold:    config.HeatmapThreshold,
+		detMaxSideLen:       cfg.DetMaxSideLen,
+		detOutsideExpandPix: cfg.DetOutsideExpandPix,
+		recHeight:           cfg.RecHeight,
+		recModelNumClasses:  cfg.RecModelNumClasses,
+		heatmapThreshold:    cfg.HeatmapThreshold,
 	}
 
 	return engine, nil
@@ -139,21 +101,21 @@ func (e *PaddleOcrEngine) RunDetect(img image.Image) ([][4]int, error) {
 		return nil, fmt.Errorf("创建 det input tensor 失败: %w", err)
 	}
 	defer detInputTensor.Destroy()
-
-	// 准备动态输出
-	// 输出形状与缩放后的输入形状一致
-	detOutputShape := []int64{1, 1, detInputShape[2], detInputShape[3]}
-	detOutputData := make([]float32, 1*1*detInputShape[2]*detInputShape[3])
-	detOutputTensor, err := ort.NewTensor(detOutputShape, detOutputData)
-	if err != nil {
-		return nil, fmt.Errorf("创建 det output tensor 失败: %w", err)
+	detInputValues := map[string]*ort.Value{
+		e.detSession.InputNames[0]: detInputTensor,
 	}
-	defer detOutputTensor.Destroy()
 
 	// 运行检测模型
-	err = e.detSession.Run([]ort.Value{detInputTensor}, []ort.Value{detOutputTensor})
+	detOutputValues, err := e.detSession.Run(detInputValues)
 	if err != nil {
 		return nil, fmt.Errorf("运行 det session 失败: %w", err)
+	}
+	detOutputValue := detOutputValues[e.detSession.OutputNames[0]]
+	defer detOutputValue.Destroy()
+
+	detOutputData, err := ort.GetTensorData[float32](detOutputValue)
+	if err != nil {
+		return nil, fmt.Errorf("获取 det output data 失败: %w", err)
 	}
 
 	// 后处理热力图，获取边界框
@@ -195,6 +157,9 @@ func (e *PaddleOcrEngine) RunRecognize(img image.Image, box [4]int) (RecResult, 
 		return RecResult{}, fmt.Errorf("创建 rec input tensor 失败: %w", err)
 	}
 	defer recInputTensor.Destroy()
+	recInputValues := map[string]*ort.Value{
+		e.recSession.InputNames[0]: recInputTensor,
+	}
 
 	// 准备动态识别输出
 	// SeqLen = W_in / 8
@@ -204,18 +169,22 @@ func (e *PaddleOcrEngine) RunRecognize(img image.Image, box [4]int) (RecResult, 
 		recModelSeqLen = 1
 	}
 
-	recOutputShape := []int64{1, recModelSeqLen, e.recModelNumClasses}
-	recOutputData := make([]float32, 1*recModelSeqLen*e.recModelNumClasses)
-	recOutputTensor, err := ort.NewTensor(recOutputShape, recOutputData)
-	if err != nil {
-		return RecResult{}, fmt.Errorf("创建 rec output tensor 失败: %w", err)
-	}
-	defer recOutputTensor.Destroy()
-
 	// 模型推理
 	e.recMutex.Lock()
-	runErr := e.recSession.Run([]ort.Value{recInputTensor}, []ort.Value{recOutputTensor})
+	recOutputValues, runErr := e.recSession.Run(recInputValues)
 	e.recMutex.Unlock()
+	recOutputValue := recOutputValues[e.recSession.OutputNames[0]]
+	defer recOutputValue.Destroy()
+
+	recOutputData, err := ort.GetTensorData[float32](recOutputValue)
+	if err != nil {
+		return RecResult{}, fmt.Errorf("获取 rec output data 错误: %w", err)
+	}
+
+	recOutputShape, err := recOutputValue.GetShape()
+	if err != nil {
+		return RecResult{}, fmt.Errorf("获取 rec output shape 错误: %w", err)
+	}
 
 	if runErr != nil {
 		return RecResult{}, fmt.Errorf("运行 rec session 失败: %w", runErr)
@@ -278,7 +247,6 @@ func (e *PaddleOcrEngine) Destroy() {
 	if e.recSession != nil {
 		e.recSession.Destroy()
 	}
-	ort.DestroyEnvironment()
 }
 
 // preprocessDetImage 对 PaddleOCR 检测模型进行预处理

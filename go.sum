@@ -1,6 +1,10 @@
-github.com/up-zero/gotool v0.0.0-20251113010806-7d845a3a0c93 h1:zXkyyKS76bUBzOn8s/Xo/MiZ4rhKlCojJqtFxImk4+A=
-github.com/up-zero/gotool v0.0.0-20251113010806-7d845a3a0c93/go.mod h1:+jwIpLHojqHUvbEmNXv/F5acdHSEkJIbNXRqT1IE78I=
-github.com/yalue/onnxruntime_go v1.22.0 h1:SzqOfFRRrLRRAFR5VoSxABjTiQSAi8Y4ETYKrMFK1jk=
-github.com/yalue/onnxruntime_go v1.22.0/go.mod h1:b4X26A8pekNb1ACJ58wAXgNKeUCGEAQ9dmACut9Sm/4=
+github.com/ebitengine/purego v0.9.0 h1:mh0zpKBIXDceC63hpvPuGLiJ8ZAa3DfrFTudmfi8A4k=
+github.com/ebitengine/purego v0.9.0/go.mod h1:iIjxzd6CiRiOG0UyXP+V1+jWqUXVjPKLAI0mRfJZTmQ=
+github.com/getcharzp/onnxruntime_purego v0.0.0-20260118041137-401482b32507 h1:d+3aUbLHK9Nfaex6GLlIhb0R7wLHV7LkiUiy0qwU54g=
+github.com/getcharzp/onnxruntime_purego v0.0.0-20260118041137-401482b32507/go.mod h1:JxWrTrdNfR1D0HBxOQixFeC1vkLoz8HPxfBwJ2gF/rw=
+github.com/up-zero/gotool v0.0.0-20260105010850-4a05e8fadd54 h1:am0pSei7ialD/EsBcWDo+gu2yVcCZz0Hv7ksOKJQll0=
+github.com/up-zero/gotool v0.0.0-20260105010850-4a05e8fadd54/go.mod h1:+jwIpLHojqHUvbEmNXv/F5acdHSEkJIbNXRqT1IE78I=
+github.com/up-zero/gotool v0.0.0-20260120011100-d685b2532b5a h1:pY1cxEGXD+Sri3sjG2gZ/9HUyKoUkTVwwwMJGwkSPMg=
+github.com/up-zero/gotool v0.0.0-20260120011100-d685b2532b5a/go.mod h1:+jwIpLHojqHUvbEmNXv/F5acdHSEkJIbNXRqT1IE78I=
 golang.org/x/image v0.32.0 h1:6lZQWq75h7L5IWNk0r+SCpUJ6tUVd3v4ZHnbRKLkUDQ=
 golang.org/x/image v0.32.0/go.mod h1:/R37rrQmKXtO6tYXAjtDLwQgFLHmhW+V6ayXlxzP2Pc=
