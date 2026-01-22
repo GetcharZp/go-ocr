@@ -2,9 +2,9 @@
 license: mit
 pipeline_tag: image-to-text
 ---
-<h1 align="center">
-    <img width="200" src="./assets/logo.png" alt="">
-</h1>
+<div align="center" style="text-align: center;">
+  <img src="./assets/logo.png" alt="logo" width="300" style="display: block; margin: 0 auto;" />
+</div>
 
 <p align="center">
    <a href="https://github.com/getcharzp/go-ocr/fork" target="blank">
