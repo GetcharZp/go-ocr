@@ -39,6 +39,34 @@ func TestDdddOcr_Classification(t *testing.T) {
 	t.Logf("识别完成, 耗时：%v, 识别内容：%v\n", time.Since(start), res)
 }
 
+func TestDdddOcr_Classification_CustomModel(t *testing.T) {
+	start := time.Now()
+	config := ddddocr.Config{
+		OnnxRuntimeLibPath: "../lib/onnxruntime.dll",
+		ModelPath:          "../ddddocr_weights/my_model.onnx",
+		DictPath:           "../ddddocr_weights/my_charsets.json",
+		UseCustomModel:     true,
+	}
+
+	engine, err := ddddocr.NewEngine(config)
+	if err != nil {
+		log.Fatalf("创建 OCR 引擎失败: %v\n", err)
+	}
+	defer engine.Destroy()
+
+	imagePath := "./captcha.png"
+	img, err := imageutil.Open(imagePath)
+	if err != nil {
+		log.Fatalf("加载图像失败: %v\n", err)
+	}
+
+	res, err := engine.Classification(img)
+	if err != nil {
+		log.Fatalf("运行识别失败: %v\n", err)
+	}
+	t.Logf("识别完成, 耗时：%v, 识别内容：%v\n", time.Since(start), res)
+}
+
 func TestDdddOcr_Detect(t *testing.T) {
 	start := time.Now()
 	config := ddddocr.Config{

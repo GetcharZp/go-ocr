@@ -14,11 +14,13 @@ type Config struct {
 	DetModelPath       string
 	DictPath           string
 	OnnxRuntimeLibPath string
+	UseCustomModel     bool // true = 使用自定义模型 (dddd-trainer)
 }
 
 // Engine ddddocr 引擎
 type Engine struct {
-	ocrSession *ort.Session
-	detSession *ort.Session
-	dict       []string
+	ocrSession     *ort.Session
+	detSession     *ort.Session
+	dict           []string
+	useCustomModel bool
 }
