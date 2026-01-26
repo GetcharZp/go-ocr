@@ -30,7 +30,9 @@ func NewEngine(cfg Config) (*Engine, error) {
 		return nil, err
 	}
 
-	engine := &Engine{}
+	engine := &Engine{
+		useCustomModel: cfg.UseCustomModel,
+	}
 
 	if cfg.ModelPath != "" {
 		session, err := oc.OnnxEngine.NewSession(cfg.ModelPath, oc.SessionOptions)
@@ -82,6 +84,21 @@ func (e *Engine) Classification(img image.Image) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("OCR 推理失败: %w", err)
 	}
+
+	if e.useCustomModel {
+		// 自定义模型：输出节点 "output"，类型 int64，直接 CTC 解码
+		outputValue := outputValues["output"]
+		defer outputValue.Destroy()
+
+		outputData, err := ort.GetTensorData[int64](outputValue)
+		if err != nil {
+			return "", fmt.Errorf("获取 OCR 输出数据失败: %w", err)
+		}
+
+		return e.postprocessOCRCustom(outputData), nil
+	}
+
+	// 官方模型：输出节点 "387"，类型 float32，argmax + CTC 解码
 	outputValue := outputValues["387"]
 	defer outputValue.Destroy()
 
@@ -135,8 +152,20 @@ func (e *Engine) preprocessOCR(img image.Image) ([]float32, []int64, error) {
 
 	grayImg := imageutil.Grayscale(dstImg)
 	inputData := make([]float32, 1*1*targetH*targetW)
-	for i, pix := range grayImg.Pix {
-		inputData[i] = float32(pix) / 255.0
+
+	for y := 0; y < targetH; y++ {
+		for x := 0; x < targetW; x++ {
+			pix := grayImg.Pix[y*grayImg.Stride+x]
+			normalized := float32(pix) / 255.0
+
+			if e.useCustomModel {
+				// 自定义模型：mean=0.456, std=0.224
+				inputData[y*targetW+x] = (normalized - 0.456) / 0.224
+			} else {
+				// 官方模型：mean=0.5, std=0.5
+				inputData[y*targetW+x] = (normalized - 0.5) / 0.5
+			}
+		}
 	}
 
 	shape := []int64{1, 1, int64(targetH), int64(targetW)}
@@ -171,6 +200,24 @@ func (e *Engine) postprocessOCR(output []float32, seqLen int) string {
 		}
 		lastIdx = maxIdx
 	}
+	return sb.String()
+}
+
+// postprocessOCRCustom 自定义模型后处理（直接 CTC 解码，无需 argmax）
+func (e *Engine) postprocessOCRCustom(output []int64) string {
+	var sb strings.Builder
+	lastIdx := int64(-1)
+
+	for _, idx := range output {
+		// CTC 解码：跳过空白符（index 0）和重复字符
+		if idx != 0 && idx != lastIdx {
+			if int(idx) < len(e.dict) {
+				sb.WriteString(e.dict[idx])
+			}
+		}
+		lastIdx = idx
+	}
+
 	return sb.String()
 }
 
