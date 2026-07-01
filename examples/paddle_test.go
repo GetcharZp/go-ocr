@@ -1,11 +1,12 @@
 package examples
 
 import (
-	ocr "github.com/getcharzp/go-ocr"
-	"github.com/up-zero/gotool/imageutil"
 	"log"
 	"testing"
 	"time"
+
+	ocr "github.com/getcharzp/go-ocr"
+	"github.com/up-zero/gotool/imageutil"
 )
 
 func TestPaddleOcr(t *testing.T) {
@@ -41,15 +42,14 @@ func TestPaddleOcr(t *testing.T) {
 	detImage := ocr.DrawBoxes(img, boxes)
 	imageutil.Save("det.jpg", detImage, 100)
 
-	// 识别
-	for _, box := range boxes {
-		start2 := time.Now()
-		result, err := engine.RunRecognize(img, box)
-		if err != nil {
-			log.Fatalf("运行识别失败: %v\n", err)
-		}
-		t.Logf("识别结果: %v, 耗时：%v\n", result, time.Since(start2))
+	// 识别（使用 RunOCR 完整流程）
+	results, err := engine.RunOCR(img)
+	if err != nil {
+		log.Fatalf("运行识别失败: %v\n", err)
+	}
+	for _, result := range results {
+		t.Logf("识别结果: %v\n", result)
 	}
 
-	t.Logf("测试完成，共识别 %d 个文本框, 耗时: %v\n", len(boxes), time.Since(start))
+	t.Logf("测试完成，共识别 %d 个文本框, 耗时: %v\n", len(results), time.Since(start))
 }

@@ -22,6 +22,7 @@ const (
 )
 
 // NewEngine 初始化引擎
+// ThreadCount > 1 时创建多个 OCR Session 实现并行识别
 func NewEngine(cfg Config) (*Engine, error) {
 	oc := new(onnx.Config)
 	_ = convertutil.CopyProperties(cfg, oc)
@@ -30,16 +31,37 @@ func NewEngine(cfg Config) (*Engine, error) {
 		return nil, err
 	}
 
+	if cfg.ThreadCount <= 0 {
+		cfg.ThreadCount = 1
+	}
+
 	engine := &Engine{
 		useCustomModel: cfg.UseCustomModel,
 	}
 
-	if cfg.ModelPath != "" {
-		session, err := oc.OnnxEngine.NewSession(cfg.ModelPath, oc.SessionOptions)
-		if err != nil {
-			return nil, fmt.Errorf("创建 OCR 会话失败: %w", err)
+	// 统一资源清理：仅在返回 error 时释放已分配的资源
+	var success bool
+	defer func() {
+		if !success {
+			engine.Destroy()
 		}
-		engine.ocrSession = session
+	}()
+
+	if cfg.ModelPath != "" {
+		// 创建识别 session 池
+		ocrSessions := make([]*ort.Session, 0, cfg.ThreadCount)
+		for i := 0; i < cfg.ThreadCount; i++ {
+			session, err := oc.OnnxEngine.NewSession(cfg.ModelPath, oc.SessionOptions)
+			if err != nil {
+				// 清理本轮循环中部分创建的 session（此时 engine.ocrSessions 尚未赋值）
+				for _, s := range ocrSessions {
+					s.Destroy()
+				}
+				return nil, fmt.Errorf("创建 OCR 会话[%d/%d]失败: %w", i, cfg.ThreadCount, err)
+			}
+			ocrSessions = append(ocrSessions, session)
+		}
+		engine.ocrSessions = ocrSessions
 
 		dict, err := util.LoadDict(cfg.DictPath)
 		if err != nil {
@@ -56,12 +78,25 @@ func NewEngine(cfg Config) (*Engine, error) {
 		engine.detSession = session
 	}
 
+	success = true
 	return engine, nil
 }
 
+// acquireSession 轮询获取一个 OCR session（无锁并发安全）
+// 返回 nil 表示 session 池为空
+func (e *Engine) acquireSession() *ort.Session {
+	if len(e.ocrSessions) == 0 {
+		return nil
+	}
+	idx := e.sessionIdx.Add(1) - 1
+	return e.ocrSessions[idx%uint64(len(e.ocrSessions))]
+}
+
 // Classification 验证码识别
+// 使用 session 池实现无锁并发：每次调用轮询获取一个独立的 session
 func (e *Engine) Classification(img image.Image) (string, error) {
-	if e.ocrSession == nil {
+	session := e.acquireSession()
+	if session == nil {
 		return "", fmt.Errorf("OCR 引擎未初始化")
 	}
 
@@ -80,7 +115,7 @@ func (e *Engine) Classification(img image.Image) (string, error) {
 		"input1": inputTensor,
 	}
 
-	outputValues, err := e.ocrSession.Run(inputValues)
+	outputValues, err := session.Run(inputValues)
 	if err != nil {
 		return "", fmt.Errorf("OCR 推理失败: %w", err)
 	}
@@ -111,7 +146,7 @@ func (e *Engine) Classification(img image.Image) (string, error) {
 	return e.postprocessOCR(outputData, seqLen), nil
 }
 
-// Detect 目标检测
+// Detect 目标检测（detSession 保持单例，检测频率低无需池化）
 func (e *Engine) Detect(img image.Image) ([]DetResult, error) {
 	if e.detSession == nil {
 		return nil, fmt.Errorf("检测引擎未初始化")
@@ -347,8 +382,10 @@ func calculateIOU(a, b DetResult) float32 {
 }
 
 func (e *Engine) Destroy() {
-	if e.ocrSession != nil {
-		e.ocrSession.Destroy()
+	for _, session := range e.ocrSessions {
+		if session != nil {
+			session.Destroy()
+		}
 	}
 	if e.detSession != nil {
 		e.detSession.Destroy()

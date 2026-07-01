@@ -1,14 +1,15 @@
 package examples
 
 import (
-	"github.com/getcharzp/go-ocr/ddddocr"
-	"github.com/up-zero/gotool/imageutil"
-	"golang.org/x/image/draw"
 	"image"
 	"image/color"
 	"log"
 	"testing"
 	"time"
+
+	"github.com/getcharzp/go-ocr/ddddocr"
+	"github.com/up-zero/gotool/imageutil"
+	"golang.org/x/image/draw"
 )
 
 func TestDdddOcr_Classification(t *testing.T) {
@@ -96,8 +97,10 @@ func TestDdddOcr_Detect(t *testing.T) {
 	draw.Draw(tagImg, img.Bounds(), img, image.Point{}, draw.Src)
 
 	for _, box := range boxes {
-		imageutil.DrawThickRectOutline(tagImg, image.Rectangle{Min: image.Point{X: box.Box[0], Y: box.Box[1]},
-			Max: image.Point{X: box.Box[2], Y: box.Box[3]}}, color.Black, 2)
+		imageutil.DrawThickRectOutline(tagImg, image.Rectangle{
+			Min: image.Point{X: box.Box[0], Y: box.Box[1]},
+			Max: image.Point{X: box.Box[2], Y: box.Box[3]},
+		}, color.Black, 2)
 	}
 	imageutil.Save("captcha_det_result.png", tagImg, 100)
 }

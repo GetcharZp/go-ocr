@@ -1,11 +1,12 @@
 package ocr
 
 import (
-	"github.com/up-zero/gotool/imageutil"
-	"golang.org/x/image/draw"
 	"image"
 	"image/color"
 	_ "image/jpeg" // 注册 jpeg 解码器
+
+	"github.com/up-zero/gotool/imageutil"
+	"golang.org/x/image/draw"
 )
 
 // RecResult OCR 识别结果结构体
@@ -26,6 +27,7 @@ type Config struct {
 	// 可选参数
 	UseCuda             bool    // (可选) 是否启用 CUDA
 	NumThreads          int     // (可选) ONNX 线程数, 默认由CPU核心数决定
+	ThreadCount         int     // (可选) 识别 Session 并发数, 默认 1。>1 时创建多个 ONNX Session 实现并行识别
 	DetMaxSideLen       int     // (可选) 检测模型预处理的最长边, 默认 960
 	DetOutsideExpandPix int     // (可选) 检测框外扩像素, 默认 10
 	RecHeight           int     // (可选) 识别模型预处理的高度, 默认 48
@@ -37,9 +39,6 @@ type Config struct {
 type Engine interface {
 	// RunDetect 图像文字区域检测
 	RunDetect(img image.Image) ([][4]int, error)
-
-	// RunRecognize 识别图像中指定区域的文字
-	RunRecognize(img image.Image, box [4]int) (RecResult, error)
 
 	// RunOCR 对图像执行检测和识别
 	RunOCR(img image.Image) ([]RecResult, error)
