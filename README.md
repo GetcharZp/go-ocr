@@ -37,29 +37,31 @@ git clone https://huggingface.co/getcharzp/go-ocr
 
 **示例代码**
 
-通过 OCR 引擎的 `RunOCR()` 方法能直接进行完整的检测与识别，也可以通过 `RunDetect()` 与 `RunRecognize()` 分别进行检测与识别。
+通过 OCR 引擎的 `RunOCR()` 方法能直接进行完整的检测与识别，也可以通过 `RunDetect()` 仅进行文字区域检测。
 
 ```go
 package main
 
 import (
 	ocr "github.com/getcharzp/go-ocr"
+	"github.com/getcharzp/go-ocr/paddle"
 	"github.com/up-zero/gotool/imageutil"
 	"log"
 )
 
 func main() {
 	// 按实际情况配置下述路径
-	config := ocr.Config{
+	config := paddle.Config{
 		OnnxRuntimeLibPath: "./lib/onnxruntime_amd64.so",
 		DetModelPath:       "./paddle_weights/det.onnx",
 		RecModelPath:       "./paddle_weights/rec.onnx",
 		DictPath:           "./paddle_weights/dict.txt",
+		// ThreadCount: 4, // (可选) 并行识别 Session 数, 默认 1
 	}
 
-	// 初始化引擎
+	// 初始化引擎（返回对象实现了 ocr.Engine 接口）
 	var engine ocr.Engine
-	engine, err := ocr.NewPaddleOcrEngine(config)
+	engine, err := paddle.NewEngine(config)
 	if err != nil {
 		log.Fatalf("创建 OCR 引擎失败: %v\n", err)
 	}

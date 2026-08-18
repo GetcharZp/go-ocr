@@ -6,19 +6,20 @@ import (
 	"time"
 
 	ocr "github.com/getcharzp/go-ocr"
+	"github.com/getcharzp/go-ocr/paddle"
 	"github.com/up-zero/gotool/imageutil"
 )
 
 func TestPaddleOcr(t *testing.T) {
 	start := time.Now()
-	config := ocr.Config{
+	config := paddle.Config{
 		OnnxRuntimeLibPath: "../lib/onnxruntime.dll",
 		DetModelPath:       "../paddle_weights/det.onnx",
 		RecModelPath:       "../paddle_weights/rec.onnx",
 		DictPath:           "../paddle_weights/dict.txt",
 	}
 
-	engine, err := ocr.NewPaddleOcrEngine(config)
+	engine, err := paddle.NewEngine(config)
 	if err != nil {
 		log.Fatalf("创建 OCR 引擎失败: %v\n", err)
 	}

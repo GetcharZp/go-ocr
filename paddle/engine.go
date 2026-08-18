@@ -1,4 +1,4 @@
-package ocr
+package paddle
 
 import (
 	"fmt"
@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 
+	ocr "github.com/getcharzp/go-ocr"
 	"github.com/getcharzp/go-ocr/internal/onnx"
 	"github.com/getcharzp/go-ocr/internal/util"
 	ort "github.com/getcharzp/onnxruntime_purego"
@@ -15,21 +16,8 @@ import (
 	"golang.org/x/image/draw"
 )
 
-// PaddleOcrEngine 是 PaddleOCR 引擎的主结构体
-type PaddleOcrEngine struct {
-	detSession  *ort.Session   // 检测（单例，线程安全）
-	recSessions []*ort.Session // 识别 session 池，支持并行
-
-	dict                []string // 字典
-	detMaxSideLen       int      // 检测模型最长边
-	detOutsideExpandPix int      // 检测框外扩像素
-	recHeight           int      // 识别模型高度
-	recModelNumClasses  int64    // 识别模型类别数
-	heatmapThreshold    float32  // 热力图阈值
-}
-
-// NewPaddleOcrEngine 用于初始化 ONNX Runtime、加载模型和字典。
-func NewPaddleOcrEngine(cfg Config) (*PaddleOcrEngine, error) {
+// NewEngine 用于初始化 ONNX Runtime、加载模型和字典。
+func NewEngine(cfg Config) (*Engine, error) {
 	oc := new(onnx.Config)
 	_ = convertutil.CopyProperties(cfg, oc)
 
@@ -85,7 +73,7 @@ func NewPaddleOcrEngine(cfg Config) (*PaddleOcrEngine, error) {
 		recSessions = append(recSessions, session)
 	}
 
-	engine := &PaddleOcrEngine{
+	engine := &Engine{
 		detSession:          detSession,
 		recSessions:         recSessions,
 		dict:                dict,
@@ -100,7 +88,7 @@ func NewPaddleOcrEngine(cfg Config) (*PaddleOcrEngine, error) {
 }
 
 // RunDetect 图像文字区域检测
-func (e *PaddleOcrEngine) RunDetect(img image.Image) ([][4]int, error) {
+func (e *Engine) RunDetect(img image.Image) ([][4]int, error) {
 	origBounds := img.Bounds()
 	origWidth := origBounds.Dx()
 	origHeight := origBounds.Dy()
@@ -148,7 +136,7 @@ func (e *PaddleOcrEngine) RunDetect(img image.Image) ([][4]int, error) {
 }
 
 // runRecognize 识别图像中指定区域的文字（接受外部 session 实现无锁并发）
-func (e *PaddleOcrEngine) runRecognize(session *ort.Session, img image.Image, box [4]int) (RecResult, error) {
+func (e *Engine) runRecognize(session *ort.Session, img image.Image, box [4]int) (ocr.RecResult, error) {
 	resultText := ""
 	resultScore := float32(0.0)
 
@@ -158,14 +146,14 @@ func (e *PaddleOcrEngine) runRecognize(session *ort.Session, img image.Image, bo
 		Max: image.Point{X: box[2], Y: box[3]},
 	})
 	if err != nil {
-		return RecResult{}, fmt.Errorf("裁切框失败: %w", err)
+		return ocr.RecResult{}, fmt.Errorf("裁切框失败: %w", err)
 	}
 
 	// 预处理
 	recInputData, recInputShape := e.preprocessRecImage(crop)
 	recInputTensor, err := ort.NewTensor(recInputShape, recInputData)
 	if err != nil {
-		return RecResult{}, fmt.Errorf("创建 rec input tensor 失败: %w", err)
+		return ocr.RecResult{}, fmt.Errorf("创建 rec input tensor 失败: %w", err)
 	}
 	defer recInputTensor.Destroy()
 	recInputValues := map[string]*ort.Value{
@@ -175,30 +163,30 @@ func (e *PaddleOcrEngine) runRecognize(session *ort.Session, img image.Image, bo
 	// 模型推理（session 专属，无需 Mutex）
 	recOutputValues, err := session.Run(recInputValues)
 	if err != nil {
-		return RecResult{}, fmt.Errorf("运行 rec session 失败: %w", err)
+		return ocr.RecResult{}, fmt.Errorf("运行 rec session 失败: %w", err)
 	}
 	recOutputValue := recOutputValues[session.OutputNames[0]]
 	defer recOutputValue.Destroy()
 
 	recOutputData, err := ort.GetTensorData[float32](recOutputValue)
 	if err != nil {
-		return RecResult{}, fmt.Errorf("获取 rec output data 错误: %w", err)
+		return ocr.RecResult{}, fmt.Errorf("获取 rec output data 错误: %w", err)
 	}
 
 	recOutputShape, err := recOutputValue.GetShape()
 	if err != nil {
-		return RecResult{}, fmt.Errorf("获取 rec output shape 错误: %w", err)
+		return ocr.RecResult{}, fmt.Errorf("获取 rec output shape 错误: %w", err)
 	}
 
 	// 后处理 (CTC 解码)
 	resultText, resultScore = e.postprocessRecOutput(recOutputData, recOutputShape)
 
-	return RecResult{Box: box, Text: resultText, Score: resultScore}, nil
+	return ocr.RecResult{Box: box, Text: resultText, Score: resultScore}, nil
 }
 
 // RunOCR 对图像执行检测和识别
 // 核心优化：Worker-Pool 模式 — 每个 rec session 独占一个 goroutine，按 stride 分摊 boxes
-func (e *PaddleOcrEngine) RunOCR(img image.Image) ([]RecResult, error) {
+func (e *Engine) RunOCR(img image.Image) ([]ocr.RecResult, error) {
 	// 文字区域检测
 	finalBoxes, err := e.RunDetect(img)
 	if err != nil {
@@ -210,7 +198,7 @@ func (e *PaddleOcrEngine) RunOCR(img image.Image) ([]RecResult, error) {
 		return nil, fmt.Errorf("识别 session 未初始化")
 	}
 
-	results := make([]RecResult, len(finalBoxes))
+	results := make([]ocr.RecResult, len(finalBoxes))
 	var errs []error
 	var errMu sync.Mutex
 	addErr := func(err error) {
@@ -254,7 +242,7 @@ func (e *PaddleOcrEngine) RunOCR(img image.Image) ([]RecResult, error) {
 }
 
 // Destroy 释放所有 ONNX 资源
-func (e *PaddleOcrEngine) Destroy() {
+func (e *Engine) Destroy() {
 	if e.detSession != nil {
 		e.detSession.Destroy()
 	}
@@ -266,7 +254,7 @@ func (e *PaddleOcrEngine) Destroy() {
 }
 
 // preprocessDetImage 对 PaddleOCR 检测模型进行预处理
-func (e *PaddleOcrEngine) preprocessDetImage(img image.Image) ([]float32, []int64) {
+func (e *Engine) preprocessDetImage(img image.Image) ([]float32, []int64) {
 	origBounds := img.Bounds()
 	origWidth := origBounds.Dx()
 	origHeight := origBounds.Dy()
@@ -320,7 +308,7 @@ func (e *PaddleOcrEngine) preprocessDetImage(img image.Image) ([]float32, []int6
 }
 
 // preprocessRecImage 识别预处理
-func (e *PaddleOcrEngine) preprocessRecImage(crop image.Image) ([]float32, []int64) {
+func (e *Engine) preprocessRecImage(crop image.Image) ([]float32, []int64) {
 	origBounds := crop.Bounds()
 	origWidth := origBounds.Dx()
 	origHeight := origBounds.Dy()
@@ -365,7 +353,7 @@ func (e *PaddleOcrEngine) preprocessRecImage(crop image.Image) ([]float32, []int
 }
 
 // postprocessRecOutput 后处理 (CTC 解码)
-func (e *PaddleOcrEngine) postprocessRecOutput(output []float32, shape []int64) (string, float32) {
+func (e *Engine) postprocessRecOutput(output []float32, shape []int64) (string, float32) {
 	wSeq := int(shape[1])
 	numClasses := int(shape[2])
 
@@ -416,4 +404,79 @@ func (e *PaddleOcrEngine) postprocessRecOutput(output []float32, shape []int64) 
 		avgScore = totalScore / float32(count)
 	}
 	return strBuilder.String(), avgScore
+}
+
+// postprocessHeatmap 将 ONNX 输出热力图转换为边界框
+func postprocessHeatmap(heatmap []float32, h, w int64, origW, origH int, threshold float32, expandPix int) [][4]int {
+	thresholdMap := make([][]bool, h)
+	for y := 0; y < int(h); y++ {
+		thresholdMap[y] = make([]bool, w)
+		for x := 0; x < int(w); x++ {
+			if heatmap[int64(y)*w+int64(x)] > threshold {
+				thresholdMap[y][x] = true
+			}
+		}
+	}
+
+	visited := make([][]bool, h)
+	for y := 0; y < int(h); y++ {
+		visited[y] = make([]bool, w)
+	}
+
+	var boxes []boundingBox
+	for y := 0; y < int(h); y++ {
+		for x := 0; x < int(w); x++ {
+			if thresholdMap[y][x] && !visited[y][x] {
+				queue := [][2]int{{x, y}}
+				visited[y][x] = true
+				blobBox := boundingBox{MinX: x, MinY: y, MaxX: x, MaxY: y}
+
+				for len(queue) > 0 {
+					point := queue[0]
+					queue = queue[1:]
+					px, py := point[0], point[1]
+					if px < blobBox.MinX {
+						blobBox.MinX = px
+					}
+					if py < blobBox.MinY {
+						blobBox.MinY = py
+					}
+					if px > blobBox.MaxX {
+						blobBox.MaxX = px
+					}
+					if py > blobBox.MaxY {
+						blobBox.MaxY = py
+					}
+					neighbors := [][2]int{{px + 1, py}, {px - 1, py}, {px, py + 1}, {px, py - 1}}
+					for _, n := range neighbors {
+						nx, ny := n[0], n[1]
+						if nx >= 0 && nx < int(w) && ny >= 0 && ny < int(h) &&
+							thresholdMap[ny][nx] && !visited[ny][nx] {
+							visited[ny][nx] = true
+							queue = append(queue, [2]int{nx, ny})
+						}
+					}
+				}
+				if (blobBox.MaxX-blobBox.MinX) > 5 && (blobBox.MaxY-blobBox.MinY) > 5 {
+					blobBox.MinX = max(blobBox.MinX-expandPix, 0)
+					blobBox.MinY = max(blobBox.MinY-expandPix, 0)
+					blobBox.MaxX = min(blobBox.MaxX+expandPix, int(w)-1)
+					blobBox.MaxY = min(blobBox.MaxY+expandPix, int(h)-1)
+					boxes = append(boxes, blobBox)
+				}
+			}
+		}
+	}
+
+	scaleX := float64(origW) / float64(w)
+	scaleY := float64(origH) / float64(h)
+	finalBoxes := make([][4]int, len(boxes))
+	for i, box := range boxes {
+		x1 := int(float64(box.MinX) * scaleX)
+		y1 := int(float64(box.MinY) * scaleY)
+		x2 := int(float64(box.MaxX) * scaleX)
+		y2 := int(float64(box.MaxY) * scaleY)
+		finalBoxes[i] = [4]int{x1, y1, x2, y2}
+	}
+	return finalBoxes
 }
