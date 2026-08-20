@@ -23,13 +23,36 @@ go-ocr 是一款基于 Golang + ONNX 构建的 OCR 工具库，专注于为 Go �
 
 ## 安装
 
-```shell
-# 下载包
-go get -u github.com/getcharzp/go-ocr
+### 1. 安装 Go 依赖
 
-# 下载模型 + 动态链接库
-git clone https://huggingface.co/getcharzp/go-ocr
+```shell
+go get -u github.com/getcharzp/go-ocr
 ```
+
+### 2. 按需下载模型与动态链接库
+
+模型与动态链接库存放在独立仓库（HuggingFace，含 ModelScope 国内镜像），**无需全量下载**，请根据实际使用的引擎按需下载所需文件。
+
+- HuggingFace 仓库地址：https://huggingface.co/getcharzp/go-ocr
+- ModelScope 镜像地址：https://www.modelscope.cn/getcharzp/go-ocr
+
+**目录结构**
+
+```txt
+paddle_weights/            # PaddleOCR 所需
+ddddocr_weights/           # DdddOCR 所需
+lib/                       # onnxruntime 动态链接库（按平台选择）
+```
+
+**动态链接库选择**
+
+onnxruntime 动态链接库需按运行平台选择：
+
+| 平台 | 文件 |
+| --- | --- |
+| Linux | `lib/onnxruntime_amd64.so` |
+| Windows | `lib/onnxruntime.dll` |
+| macOS | `lib/onnxruntime_amd64.dylib` |
 
 ## 快速开始
 
