@@ -30,6 +30,7 @@ func NewEngine(cfg Config) (*Engine, error) {
 	if err := oc.New(); err != nil {
 		return nil, err
 	}
+	defer oc.Close()
 
 	if cfg.ThreadCount <= 0 {
 		cfg.ThreadCount = 1
@@ -55,7 +56,7 @@ func NewEngine(cfg Config) (*Engine, error) {
 			if err != nil {
 				// 清理本轮循环中部分创建的 session（此时 engine.ocrSessions 尚未赋值）
 				for _, s := range ocrSessions {
-					s.Destroy()
+					s.Close()
 				}
 				return nil, fmt.Errorf("创建 OCR 会话[%d/%d]失败: %w", i, cfg.ThreadCount, err)
 			}
@@ -109,10 +110,10 @@ func (e *Engine) Classification(img image.Image) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer inputTensor.Destroy()
+	defer inputTensor.Close()
 
 	inputValues := map[string]*ort.Value{
-		"input1": inputTensor,
+		session.Inputs[0].Name: inputTensor,
 	}
 
 	outputValues, err := session.Run(inputValues)
@@ -121,9 +122,9 @@ func (e *Engine) Classification(img image.Image) (string, error) {
 	}
 
 	if e.useCustomModel {
-		// 自定义模型：输出节点 "output"，类型 int64，直接 CTC 解码
-		outputValue := outputValues["output"]
-		defer outputValue.Destroy()
+		// 自定义模型：输出类型 int64，直接 CTC 解码
+		outputValue := outputValues[session.Outputs[0].Name]
+		defer outputValue.Close()
 
 		outputData, err := ort.GetTensorData[int64](outputValue)
 		if err != nil {
@@ -133,9 +134,9 @@ func (e *Engine) Classification(img image.Image) (string, error) {
 		return e.postprocessOCRCustom(outputData), nil
 	}
 
-	// 官方模型：输出节点 "387"，类型 float32，argmax + CTC 解码
-	outputValue := outputValues["387"]
-	defer outputValue.Destroy()
+	// 官方模型：输出类型 float32，argmax + CTC 解码
+	outputValue := outputValues[session.Outputs[0].Name]
+	defer outputValue.Close()
 
 	outputData, err := ort.GetTensorData[float32](outputValue)
 	if err != nil {
@@ -159,18 +160,18 @@ func (e *Engine) Detect(img image.Image) ([]DetResult, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer inputTensor.Destroy()
+	defer inputTensor.Close()
 
 	inputValues := map[string]*ort.Value{
-		"images": inputTensor,
+		e.detSession.Inputs[0].Name: inputTensor,
 	}
 
 	outputValues, err := e.detSession.Run(inputValues)
 	if err != nil {
 		return nil, fmt.Errorf("检测推理失败: %w", err)
 	}
-	outputValue := outputValues["output"]
-	defer outputValue.Destroy()
+	outputValue := outputValues[e.detSession.Outputs[0].Name]
+	defer outputValue.Close()
 
 	outputData, err := ort.GetTensorData[float32](outputValue)
 	if err != nil {
@@ -384,10 +385,10 @@ func calculateIOU(a, b DetResult) float32 {
 func (e *Engine) Destroy() {
 	for _, session := range e.ocrSessions {
 		if session != nil {
-			session.Destroy()
+			session.Close()
 		}
 	}
 	if e.detSession != nil {
-		e.detSession.Destroy()
+		e.detSession.Close()
 	}
 }

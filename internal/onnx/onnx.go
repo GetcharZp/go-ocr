@@ -17,8 +17,8 @@ type Config struct {
 	NumThreads int  // (可选) ONNX 线程数, 默认由CPU核心数决定
 
 	// EnableCpuMemArena 控制 ONNX 的内存池策略
-	// false (默认): 禁用内存池，推理速度稍慢，但 Destroy 后立即归还内存给 OS ，解决内存滞留问题
-	// true: 启用内存池，推理速度最快，但 Destroy 后内存会被缓存以供复用
+	// false (默认): 禁用内存池，推理速度稍慢，但 Close 后立即归还内存给 OS ，解决内存滞留问题
+	// true: 启用内存池，推理速度最快，但 Close 后内存会被缓存以供复用
 	EnableCpuMemArena bool
 }
 
@@ -46,25 +46,42 @@ func (cfg *Config) New() error {
 	if err != nil {
 		return err
 	}
+	// 配置失败时释放 options，成功时由调用方通过 Close 释放
+	success := false
+	defer func() {
+		if !success {
+			options.Close()
+		}
+	}()
+
 	if cfg.NumThreads > 0 {
-		if err := options.SetIntraOpNumThreads(int32(cfg.NumThreads)); err != nil {
+		if err := options.SetIntraOpNumThreads(cfg.NumThreads); err != nil {
 			return err
 		}
 	}
 
 	// 设置内存策略
-	if err := options.SetCpuMemArena(cfg.EnableCpuMemArena); err != nil {
+	if err := options.SetCPUMemArena(cfg.EnableCpuMemArena); err != nil {
 		return fmt.Errorf("设置 CPU 内存池失败: %w", err)
 	}
 
 	// 启用CUDA
 	if cfg.UseCuda {
-		if err := options.EnableCUDA(); err != nil {
+		if err := options.EnableCUDA(nil); err != nil {
 			return fmt.Errorf("启用 CUDA 失败: %w", err)
 		}
 	}
 	cfg.SessionOptions = options
 	cfg.OnnxEngine = onnxEngine
 
+	success = true
 	return nil
+}
+
+// Close 释放会话选项；Session 创建完成后即可调用，不影响已创建的 Session。
+func (cfg *Config) Close() {
+	if cfg.SessionOptions != nil {
+		cfg.SessionOptions.Close()
+		cfg.SessionOptions = nil
+	}
 }

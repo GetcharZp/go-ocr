@@ -1,6 +1,9 @@
 ---
 license: mit
 pipeline_tag: image-to-text
+language:
+  - en
+  - zh
 ---
 <div align="center" style="text-align: center;">
   <img src="./assets/logo.png" alt="logo" width="300" style="display: block; margin: 0 auto;" />
@@ -18,49 +21,45 @@ pipeline_tag: image-to-text
    </a>
 </p>
 
-go-ocr 是一款基于 Golang + ONNX 构建的 OCR 工具库，专注于为 Go 生态提供简单易用、可扩展的文字识别能力。
-目前已完成与 PaddleOCR、DdddOCR 的对接，支持快速实现图像文字检测与识别。
+<p align="center">
+  English | <a href="./docs/README_zh.md">简体中文</a>
+</p>
 
-## 安装
+go-ocr is an OCR library built on Golang + ONNX, focused on providing simple, easy-to-use and extensible text recognition capabilities for the Go ecosystem.
+It already integrates with PaddleOCR and DdddOCR, so you can quickly implement image text detection and recognition.
 
-### 1. 安装 Go 依赖
+## Installation
+
+### 1. Install the Go dependency
 
 ```shell
 go get -u github.com/getcharzp/go-ocr
 ```
 
-### 2. 按需下载模型与动态链接库
+### 2. Download the models and dynamic libraries you need
 
-模型与动态链接库存放在独立仓库（HuggingFace，含 ModelScope 国内镜像），**无需全量下载**，请根据实际使用的引擎按需下载所需文件。
+Models and dynamic libraries are hosted in a separate repository (HuggingFace, with a ModelScope mirror for mainland China). **There is no need to download everything** — download only the files required by the engine you actually use.
 
-- HuggingFace 仓库地址：https://huggingface.co/getcharzp/go-ocr
-- ModelScope 镜像地址：https://www.modelscope.cn/getcharzp/go-ocr
+- HuggingFace repository: https://huggingface.co/getcharzp/go-ocr
+- ModelScope mirror: https://www.modelscope.cn/getcharzp/go-ocr
 
-**目录结构**
+**Choosing the dynamic library**
 
-```txt
-paddle_weights/            # PaddleOCR 所需
-ddddocr_weights/           # DdddOCR 所需
-lib/                       # onnxruntime 动态链接库（按平台选择）
-```
+Pick the onnxruntime dynamic library that matches your runtime platform:
 
-**动态链接库选择**
-
-onnxruntime 动态链接库需按运行平台选择：
-
-| 平台 | 文件 |
+| Platform | File |
 | --- | --- |
 | Linux | `lib/onnxruntime_amd64.so` |
 | Windows | `lib/onnxruntime.dll` |
 | macOS | `lib/onnxruntime_amd64.dylib` |
 
-## 快速开始
+## Quick Start
 
 ### PaddleOCR
 
-**示例代码**
+**Example code**
 
-通过 OCR 引擎的 `RunOCR()` 方法能直接进行完整的检测与识别，也可以通过 `RunDetect()` 仅进行文字区域检测。
+Calling `RunOCR()` on the engine performs full detection and recognition, while `RunDetect()` performs text region detection only.
 
 ```go
 package main
@@ -73,51 +72,51 @@ import (
 )
 
 func main() {
-	// 按实际情况配置下述路径
+	// Configure these paths for your environment
 	config := paddle.Config{
 		OnnxRuntimeLibPath: "./lib/onnxruntime_amd64.so",
 		DetModelPath:       "./paddle_weights/det.onnx",
 		RecModelPath:       "./paddle_weights/rec.onnx",
 		DictPath:           "./paddle_weights/dict.txt",
-		// ThreadCount: 4, // (可选) 并行识别 Session 数, 默认 1
+		// ThreadCount: 4, // (optional) number of parallel recognition sessions, defaults to 1
 	}
 
-	// 初始化引擎（返回对象实现了 ocr.Engine 接口）
+	// Initialize the engine (the returned value implements the ocr.Engine interface)
 	var engine ocr.Engine
 	engine, err := paddle.NewEngine(config)
 	if err != nil {
-		log.Fatalf("创建 OCR 引擎失败: %v\n", err)
+		log.Fatalf("failed to create OCR engine: %v\n", err)
 	}
 	defer engine.Destroy()
 
-	// 打开图像
+	// Open the image
 	imagePath := "./test.jpg"
 	img, err := imageutil.Open(imagePath)
 	if err != nil {
-		log.Fatalf("加载图像失败: %v\n", err)
+		log.Fatalf("failed to load image: %v\n", err)
 	}
 
-	// OCR识别
+	// Run OCR
 	results, err := engine.RunOCR(img)
 	if err != nil {
-		log.Fatalf("运行 OCR 失败: %v\n", err)
+		log.Fatalf("failed to run OCR: %v\n", err)
 	}
 	for _, result := range results {
-		log.Printf("识别结果: %v\n", result)
+		log.Printf("result: %v\n", result)
 	}
 }
 ```
 
-**示例效果**
+**Example output**
 
-| 原图                                                  | 检测结果                                               |
+| Original image | Detection result |
 |-----------------------------------------------------|----------------------------------------------------|
 | <img width="100%" src="./examples/test.jpg" alt=""> | <img width="100%" src="./examples/det.jpg" alt=""> |
 
 
 ### DdddOCR
 
-**示例代码**
+**Example code**
 
 ```go
 package main
@@ -139,19 +138,19 @@ func main() {
 
 	engine, err := ddddocr.NewEngine(config)
 	if err != nil {
-		log.Fatalf("创建 OCR 引擎失败: %v\n", err)
+		log.Fatalf("failed to create OCR engine: %v\n", err)
 	}
 	defer engine.Destroy()
 
 	imagePath := "./captcha_det.png"
 	img, err := imageutil.Open(imagePath)
 	if err != nil {
-		log.Fatalf("加载图像失败: %v\n", err)
+		log.Fatalf("failed to load image: %v\n", err)
 	}
 
 	boxes, err := engine.Detect(img)
 	if err != nil {
-		log.Fatalf("运行检测失败: %v\n", err)
+		log.Fatalf("failed to run detection: %v\n", err)
 	}
 
 	tagImg := image.NewRGBA(img.Bounds())
@@ -165,9 +164,12 @@ func main() {
 }
 ```
 
-**示例效果**
+**Example output**
 
-| 原图                                                          | 检测结果                                                              |
+| Original image | Detection result |
 |-------------------------------------------------------------|-------------------------------------------------------------------|
 | <img width="100%" src="./examples/captcha_det.png" alt="">  | <img width="100%" src="./examples/captcha_det_result.png" alt=""> |
 
+## License
+
+[MIT](./LICENSE)

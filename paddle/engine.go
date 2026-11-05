@@ -24,6 +24,7 @@ func NewEngine(cfg Config) (*Engine, error) {
 	if err := oc.New(); err != nil {
 		return nil, err
 	}
+	defer oc.Close()
 
 	// 检查和设置默认值
 	if cfg.DetModelPath == "" || cfg.RecModelPath == "" || cfg.DictPath == "" {
@@ -64,9 +65,9 @@ func NewEngine(cfg Config) (*Engine, error) {
 	for i := 0; i < cfg.ThreadCount; i++ {
 		session, err := oc.OnnxEngine.NewSession(cfg.RecModelPath, oc.SessionOptions)
 		if err != nil {
-			detSession.Destroy()
+			detSession.Close()
 			for _, s := range recSessions {
-				s.Destroy()
+				s.Close()
 			}
 			return nil, fmt.Errorf("创建 rec session[%d/%d] 失败: %w", i, cfg.ThreadCount, err)
 		}
@@ -99,9 +100,9 @@ func (e *Engine) RunDetect(img image.Image) ([][4]int, error) {
 	if err != nil {
 		return nil, fmt.Errorf("创建 det input tensor 失败: %w", err)
 	}
-	defer detInputTensor.Destroy()
+	defer detInputTensor.Close()
 	detInputValues := map[string]*ort.Value{
-		e.detSession.InputNames[0]: detInputTensor,
+		e.detSession.Inputs[0].Name: detInputTensor,
 	}
 
 	// 运行检测模型
@@ -109,8 +110,8 @@ func (e *Engine) RunDetect(img image.Image) ([][4]int, error) {
 	if err != nil {
 		return nil, fmt.Errorf("运行 det session 失败: %w", err)
 	}
-	detOutputValue := detOutputValues[e.detSession.OutputNames[0]]
-	defer detOutputValue.Destroy()
+	detOutputValue := detOutputValues[e.detSession.Outputs[0].Name]
+	defer detOutputValue.Close()
 
 	detOutputData, err := ort.GetTensorData[float32](detOutputValue)
 	if err != nil {
@@ -155,9 +156,9 @@ func (e *Engine) runRecognize(session *ort.Session, img image.Image, box [4]int)
 	if err != nil {
 		return ocr.RecResult{}, fmt.Errorf("创建 rec input tensor 失败: %w", err)
 	}
-	defer recInputTensor.Destroy()
+	defer recInputTensor.Close()
 	recInputValues := map[string]*ort.Value{
-		session.InputNames[0]: recInputTensor,
+		session.Inputs[0].Name: recInputTensor,
 	}
 
 	// 模型推理（session 专属，无需 Mutex）
@@ -165,8 +166,8 @@ func (e *Engine) runRecognize(session *ort.Session, img image.Image, box [4]int)
 	if err != nil {
 		return ocr.RecResult{}, fmt.Errorf("运行 rec session 失败: %w", err)
 	}
-	recOutputValue := recOutputValues[session.OutputNames[0]]
-	defer recOutputValue.Destroy()
+	recOutputValue := recOutputValues[session.Outputs[0].Name]
+	defer recOutputValue.Close()
 
 	recOutputData, err := ort.GetTensorData[float32](recOutputValue)
 	if err != nil {
@@ -244,11 +245,11 @@ func (e *Engine) RunOCR(img image.Image) ([]ocr.RecResult, error) {
 // Destroy 释放所有 ONNX 资源
 func (e *Engine) Destroy() {
 	if e.detSession != nil {
-		e.detSession.Destroy()
+		e.detSession.Close()
 	}
 	for _, session := range e.recSessions {
 		if session != nil {
-			session.Destroy()
+			session.Close()
 		}
 	}
 }
