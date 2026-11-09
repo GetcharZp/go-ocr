@@ -19,6 +19,9 @@ language:
    <a href="https://github.com/getcharzp/go-ocr/pulls" target="blank">
       <img src="https://img.shields.io/github/issues-pr/getcharzp/go-ocr?style=for-the-badge" alt="go-ocr pull-requests"/>
    </a>
+   <a href="https://github.com/getcharzp/go-ocr/actions/workflows/ci.yml" target="blank">
+      <img src="https://github.com/getcharzp/go-ocr/actions/workflows/ci.yml/badge.svg?branch=master" alt="go-ocr ci"/>
+   </a>
 </p>
 
 <p align="center">

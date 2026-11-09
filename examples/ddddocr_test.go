@@ -1,106 +1,191 @@
 package examples
 
 import (
-	"image"
-	"image/color"
-	"log"
+	"fmt"
+	"os"
+	"path/filepath"
+	"reflect"
+	"sync"
 	"testing"
-	"time"
 
 	"github.com/getcharzp/go-ocr/ddddocr"
-	"github.com/up-zero/gotool/imageutil"
-	"golang.org/x/image/draw"
+	"github.com/getcharzp/go-ocr/internal/testutil"
 )
 
-func TestDdddOcr_Classification(t *testing.T) {
-	start := time.Now()
-	config := ddddocr.Config{
-		OnnxRuntimeLibPath: "../lib/onnxruntime.dll",
-		ModelPath:          "../ddddocr_weights/common.onnx",
-		DictPath:           "../ddddocr_weights/dict.txt",
+const wantCaptcha = "f233g"
+
+func newDdddocrEngine(t *testing.T, threadCount int) *ddddocr.Engine {
+	t.Helper()
+
+	lib := testutil.LibPath()
+	model := filepath.Join(testutil.DdddocrDir(), "common.onnx")
+	detModel := filepath.Join(testutil.DdddocrDir(), "common_det.onnx")
+	dict := filepath.Join(testutil.DdddocrDir(), "dict.txt")
+	for _, path := range []string{lib, model, detModel, dict} {
+		testutil.RequireAsset(t, path)
 	}
 
-	engine, err := ddddocr.NewEngine(config)
+	engine, err := ddddocr.NewEngine(ddddocr.Config{
+		OnnxRuntimeLibPath: lib,
+		ModelPath:          model,
+		DetModelPath:       detModel,
+		DictPath:           dict,
+		ThreadCount:        threadCount,
+	})
 	if err != nil {
-		log.Fatalf("创建 OCR 引擎失败: %v\n", err)
+		t.Fatalf("create ddddocr engine: %v", err)
 	}
-	defer engine.Destroy()
-
-	imagePath := "./captcha.png"
-	img, err := imageutil.Open(imagePath)
-	if err != nil {
-		log.Fatalf("加载图像失败: %v\n", err)
-	}
-
-	// 识别
-	res, err := engine.Classification(img)
-	if err != nil {
-		log.Fatalf("运行检测失败: %v\n", err)
-	}
-	t.Logf("识别完成, 耗时：%v, 识别内容：%v\n", time.Since(start), res)
+	t.Cleanup(engine.Destroy)
+	return engine
 }
 
-func TestDdddOcr_Classification_CustomModel(t *testing.T) {
-	start := time.Now()
-	config := ddddocr.Config{
-		OnnxRuntimeLibPath: "../lib/onnxruntime.dll",
-		ModelPath:          "../ddddocr_weights/my_model.onnx",
-		DictPath:           "../ddddocr_weights/my_charsets.json",
-		UseCustomModel:     true,
-	}
+func TestDdddOCRClassification(t *testing.T) {
+	engine := newDdddocrEngine(t, 1)
+	img := testutil.OpenImage(t, testutil.ExamplePath("captcha.png"))
 
-	engine, err := ddddocr.NewEngine(config)
+	got, err := engine.Classification(img)
 	if err != nil {
-		log.Fatalf("创建 OCR 引擎失败: %v\n", err)
+		t.Fatalf("Classification() error = %v", err)
 	}
-	defer engine.Destroy()
-
-	imagePath := "./captcha.png"
-	img, err := imageutil.Open(imagePath)
-	if err != nil {
-		log.Fatalf("加载图像失败: %v\n", err)
+	if got != wantCaptcha {
+		t.Fatalf("Classification() = %q, want %q", got, wantCaptcha)
 	}
-
-	res, err := engine.Classification(img)
-	if err != nil {
-		log.Fatalf("运行识别失败: %v\n", err)
-	}
-	t.Logf("识别完成, 耗时：%v, 识别内容：%v\n", time.Since(start), res)
 }
 
-func TestDdddOcr_Detect(t *testing.T) {
-	start := time.Now()
-	config := ddddocr.Config{
-		OnnxRuntimeLibPath: "../lib/onnxruntime.dll",
-		DetModelPath:       "../ddddocr_weights/common_det.onnx",
-	}
-
-	engine, err := ddddocr.NewEngine(config)
-	if err != nil {
-		log.Fatalf("创建 OCR 引擎失败: %v\n", err)
-	}
-	defer engine.Destroy()
-
-	imagePath := "./captcha_det.png"
-	img, err := imageutil.Open(imagePath)
-	if err != nil {
-		log.Fatalf("加载图像失败: %v\n", err)
-	}
+func TestDdddOCRDetect(t *testing.T) {
+	engine := newDdddocrEngine(t, 1)
+	img := testutil.OpenImage(t, testutil.ExamplePath("captcha_det.png"))
+	bounds := img.Bounds()
 
 	boxes, err := engine.Detect(img)
 	if err != nil {
-		log.Fatalf("运行检测失败: %v\n", err)
+		t.Fatalf("Detect() error = %v", err)
 	}
-	t.Logf("识别完成, 耗时：%v, 识别内容：%v\n", time.Since(start), boxes)
+	if len(boxes) < 10 {
+		t.Fatalf("Detect() returned %d boxes, want at least 10", len(boxes))
+	}
+	for i, box := range boxes {
+		if box.Box[0] < 0 || box.Box[1] < 0 || box.Box[2] > bounds.Dx() || box.Box[3] > bounds.Dy() ||
+			box.Box[0] >= box.Box[2] || box.Box[1] >= box.Box[3] {
+			t.Errorf("box[%d] = %v is outside the image bounds %v", i, box.Box, bounds)
+		}
+		if box.Score <= 0 {
+			t.Errorf("box[%d] has a non-positive score: %v", i, box.Score)
+		}
+	}
+}
 
-	tagImg := image.NewRGBA(img.Bounds())
-	draw.Draw(tagImg, img.Bounds(), img, image.Point{}, draw.Src)
-
+func detBoxSet(boxes []ddddocr.DetResult) map[[4]int]int {
+	set := make(map[[4]int]int, len(boxes))
 	for _, box := range boxes {
-		imageutil.DrawThickRectOutline(tagImg, image.Rectangle{
-			Min: image.Point{X: box.Box[0], Y: box.Box[1]},
-			Max: image.Point{X: box.Box[2], Y: box.Box[3]},
-		}, color.Black, 2)
+		set[box.Box]++
 	}
-	imageutil.Save("captcha_det_result.png", tagImg, 100)
+	return set
+}
+
+// TestDdddOCRConcurrent calls Classification and Detect from many goroutines
+// against one shared engine. This is the scenario that used to crash the
+// Windows test run with an access violation (0xc0000005).
+func TestDdddOCRConcurrent(t *testing.T) {
+	engine := newDdddocrEngine(t, 2)
+	captcha := testutil.OpenImage(t, testutil.ExamplePath("captcha.png"))
+	detImg := testutil.OpenImage(t, testutil.ExamplePath("captcha_det.png"))
+
+	baselineText, err := engine.Classification(captcha)
+	if err != nil {
+		t.Fatalf("baseline Classification() error = %v", err)
+	}
+	if baselineText != wantCaptcha {
+		t.Fatalf("baseline Classification() = %q, want %q", baselineText, wantCaptcha)
+	}
+	baselineBoxes, err := engine.Detect(detImg)
+	if err != nil {
+		t.Fatalf("baseline Detect() error = %v", err)
+	}
+	if len(baselineBoxes) == 0 {
+		t.Fatal("baseline Detect() returned no boxes")
+	}
+	wantBoxes := detBoxSet(baselineBoxes)
+
+	const (
+		goroutines = 32
+		iterations = 20
+	)
+	var wg sync.WaitGroup
+	errs := make(chan error, goroutines)
+
+	for worker := range goroutines {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := range iterations {
+				gotText, err := engine.Classification(captcha)
+				if err != nil {
+					errs <- fmt.Errorf("worker %d iteration %d: Classification() error: %w", worker, i, err)
+					return
+				}
+				if gotText != baselineText {
+					errs <- fmt.Errorf("worker %d iteration %d: Classification() = %q, want %q",
+						worker, i, gotText, baselineText)
+					return
+				}
+
+				if i%5 != 0 {
+					continue
+				}
+				gotBoxes, err := engine.Detect(detImg)
+				if err != nil {
+					errs <- fmt.Errorf("worker %d iteration %d: Detect() error: %w", worker, i, err)
+					return
+				}
+				if gotSet := detBoxSet(gotBoxes); !reflect.DeepEqual(gotSet, wantBoxes) {
+					errs <- fmt.Errorf("worker %d iteration %d: Detect() boxes differ from baseline\n got: %v\nwant: %v",
+						worker, i, gotSet, wantBoxes)
+					return
+				}
+			}
+		}()
+	}
+
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
+	}
+}
+
+// TestDdddOCRClassificationCustomModel is opt-in because the model and charset
+// come from dddd-trainer and are not part of the published asset repository.
+func TestDdddOCRClassificationCustomModel(t *testing.T) {
+	model := os.Getenv("GO_OCR_DDDDOCR_CUSTOM_MODEL")
+	charset := os.Getenv("GO_OCR_DDDDOCR_CUSTOM_CHARSET")
+	if model == "" || charset == "" {
+		t.Skip("set GO_OCR_DDDDOCR_CUSTOM_MODEL and GO_OCR_DDDDOCR_CUSTOM_CHARSET to run")
+	}
+
+	lib := testutil.LibPath()
+	for _, path := range []string{lib, model, charset} {
+		testutil.RequireAsset(t, path)
+	}
+
+	engine, err := ddddocr.NewEngine(ddddocr.Config{
+		OnnxRuntimeLibPath: lib,
+		ModelPath:          model,
+		DictPath:           charset,
+		UseCustomModel:     true,
+	})
+	if err != nil {
+		t.Fatalf("create custom-model ddddocr engine: %v", err)
+	}
+	defer engine.Destroy()
+
+	img := testutil.OpenImage(t, testutil.ExamplePath("captcha.png"))
+	got, err := engine.Classification(img)
+	if err != nil {
+		t.Fatalf("Classification() error = %v", err)
+	}
+	if got == "" {
+		t.Fatal("Classification() returned an empty result")
+	}
+	t.Logf("custom model result: %q", got)
 }

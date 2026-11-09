@@ -1,0 +1,156 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unit:
+    name: unit / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Check formatting
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "The following files are not gofmt'd:"
+            echo "$unformatted"
+            gofmt -d .
+            exit 1
+          fi
+
+      - name: Vet
+        shell: bash
+        run: go vet ./...
+
+      # -short skips every test that needs the ONNX Runtime library or models.
+      - name: Unit tests
+        shell: bash
+        run: go test ./... -short -count=1 -shuffle=on -timeout=10m -v
+
+  integration:
+    name: integration / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    env:
+      GO_OCR_ASSETS_DIR: ${{ github.workspace }}/.ci-assets
+      GO_OCR_REQUIRE_ASSETS: "1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Cache ONNX Runtime and models
+        uses: actions/cache@v4
+        with:
+          path: .ci-assets
+          key: go-ocr-assets-${{ runner.os }}-${{ runner.arch }}-v1-${{ hashFiles('scripts/download-assets.sh') }}
+
+      - name: Download ONNX Runtime and models
+        shell: bash
+        run: bash scripts/download-assets.sh .ci-assets
+
+      - name: Integration tests
+        shell: bash
+        run: go test ./... -count=1 -shuffle=on -timeout=30m -v
+
+  concurrency-stress:
+    name: concurrency stress / ${{ matrix.os }}
+    needs: unit
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    env:
+      GO_OCR_ASSETS_DIR: ${{ github.workspace }}/.ci-assets
+      GO_OCR_REQUIRE_ASSETS: "1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Cache ONNX Runtime and models
+        uses: actions/cache@v4
+        with:
+          path: .ci-assets
+          key: go-ocr-assets-${{ runner.os }}-${{ runner.arch }}-v1-${{ hashFiles('scripts/download-assets.sh') }}
+
+      - name: Download ONNX Runtime and models
+        shell: bash
+        run: bash scripts/download-assets.sh .ci-assets
+
+      # Repeating the concurrency tests makes intermittent crashes (for example
+      # the 0xc0000005 access violation seen on Windows) much more likely to
+      # surface instead of passing by chance.
+      - name: Stress concurrent inference
+        shell: bash
+        env:
+          GOMAXPROCS: "4"
+        run: go test ./examples -run 'Concurrent' -count=3 -shuffle=on -timeout=30m -v
+
+  race:
+    name: race / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    env:
+      CGO_ENABLED: "1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # The race detector only covers Go code; model-backed tests are skipped
+      # here because -race slows down preprocessing enough to blow the budget.
+      - name: Race detector
+        shell: bash
+        run: go test ./... -race -short -count=1 -timeout=15m
